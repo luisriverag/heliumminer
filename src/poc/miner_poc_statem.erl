@@ -41,6 +41,7 @@
 -endif.
 
 -include_lib("blockchain/include/blockchain_vars.hrl").
+-include_lib("blockchain/include/blockchain_caps.hrl").
 
 -define(SERVER, ?MODULE).
 -define(MINING_TIMEOUT, 30).
@@ -129,9 +130,20 @@ init(Args) ->
         {ok, State, #data{poc_restarts = POCRestarts} = Data} ->
             case is_supported_state(State) of
                 true ->
-                    {ok, State, maybe_init_addr_hash(Data#data{base_dir=BaseDir, blockchain=Blockchain,
-                                          address=Address, poc_interval=Delay, state=State,
-                                          poc_restarts = POCRestarts - 1})};
+                    %% to handle scenario whereby existing hotspots transition to light gateways
+                    %% check the GW mode is compatible with the loaded state, if not default to requesting
+                    Ledger = blockchain:ledger(Blockchain),
+                    case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
+                        {ok, GwInfo} ->
+                            case blockchain_ledger_gateway_v2:is_valid_capability(GwInfo, ?GW_CAPABILITY_POC_CHALLENGER, Ledger) of
+                                true ->
+                                    {ok, State, maybe_init_addr_hash(Data#data{base_dir=BaseDir, blockchain=Blockchain,
+                                                          address=Address, poc_interval=Delay, state=State,
+                                                          poc_restarts = POCRestarts - 1})};
+                                _ ->
+                                    {ok, requesting, maybe_init_addr_hash(#data{base_dir=BaseDir, blockchain=Blockchain,
+                                         address=Address, poc_interval=Delay, state=requesting})}
+                            end;
                 false ->
                     lager:debug("Loaded unsupported state ~p, ignoring and defaulting to requesting", [State]),
                     {ok, requesting, maybe_init_addr_hash(#data{base_dir=BaseDir, blockchain=Blockchain,
@@ -809,26 +821,31 @@ allow_request(BlockHash, #data{blockchain=Blockchain,
             _ ->
                 POCInterval0
         end,
-
     try
         case blockchain_ledger_v1:find_gateway_info(Address, Ledger) of
             {ok, GwInfo} ->
-                {ok, Block} = blockchain:get_block(BlockHash, Blockchain),
-                Height = blockchain_block:height(Block),
-                ChallengeOK =
-                    case blockchain_ledger_gateway_v2:last_poc_challenge(GwInfo) of
-                        undefined ->
-                            lager:info("got block ~p @ height ~p (never challenged before)", [BlockHash, Height]),
-                            true;
-                        LastChallenge ->
-                            case (Height - LastChallenge) > POCInterval of
-                                true -> 1 == rand:uniform(max(10, POCInterval div 10));
-                                false -> false
-                            end
-                    end,
-                LocationOK = true,
-                LocationOK = miner_lora:location_ok(),
-                ChallengeOK andalso LocationOK;
+                case blockchain_ledger_gateway_v2:is_valid_capability(GWInfo, ?GW_CAPABILITY_POC_CHALLENGER, Ledger) of
+                    true ->
+                        {ok, Block} = blockchain:get_block(BlockHash, Blockchain),
+                        Height = blockchain_block:height(Block),
+                        ChallengeOK =
+                            case blockchain_ledger_gateway_v2:last_poc_challenge(GwInfo) of
+                                undefined ->
+                                    lager:info("got block ~p @ height ~p (never challenged before)", [BlockHash, Height]),
+                                    true;
+                                LastChallenge ->
+                                    case (Height - LastChallenge) > POCInterval of
+                                        true -> 1 == rand:uniform(max(10, POCInterval div 10));
+                                        false -> false
+                                    end
+                            end,
+                        LocationOK = true,
+                        LocationOK = miner_lora:location_ok(),
+                        ChallengeOK andalso LocationOK;
+                    _ ->
+                        %% the GW is not allowed to send POC challenges
+                        false
+                end;
             %% mostly this is going to be unasserted full nodes
             _ ->
                 false
