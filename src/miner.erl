@@ -675,29 +675,18 @@ snapshot_hash(Ledger, Block_Height_Next, Metadata, F) ->
     end.
 
 metadata_find_most_common_snapshot_hash(Metadata, F) ->
-    % iterate through the metadata collecting them
     Counts = metadata_count_snapshot_hashes(Metadata),
-    % flatten the map into a list, sorted by hash count,
-    % highest first. take the most common one and make sure
-    % that enough nodes agree on that snapshot. if not, don't
-    % return anything.
+    % Looking for highest count AND sufficient agreement:
     case lists:reverse(lists:keysort(2, maps:to_list(Counts))) of
-        [] ->
-            <<>>;
-        % head should be the node with the highest count.
-        % don't include it if we have too much disagreement or
-        % not enough reports
-        [{_, C} | _ ] when C < ((2*F)+1) ->
-            <<>>;
-        [{SH, _} | _ ] ->
-            SH
+        []                                   -> <<>>;
+        [{_, C} | _ ] when C < ((2 * F) + 1) -> <<>>; % Insufficient agreement.
+        [{H, _} | _ ]                        -> H
     end.
 
 -spec metadata_count_snapshot_hashes(metadata()) -> #{binary() => pos_integer()}.
 metadata_count_snapshot_hashes(Metadata) ->
     Plus1 = fun(V) -> V + 1 end,
     lists:foldl(
-      % we have one, so count unique instances of it
       fun({_, #{snapshot_hash := H}}, C) -> maps:update_with(H, Plus1, 1, C) end,
       #{},
       metadata_only_v2(Metadata)).
