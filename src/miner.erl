@@ -542,92 +542,90 @@ priv_create_block(Metadata, Txns, HBBFTRound, Chain, {MyPubKey, SignFun}) ->
     {SeenVectors, BBAs} = lists:unzip(SeenBBAs),
     {ok, Consensus} = blockchain_ledger_v1:consensus_members(blockchain:ledger(Chain)),
     BBA = process_bbas(length(Consensus), BBAs),
-    Reply =
-        case process_hashes(Hashes, F) of
-            [CurrentBlockHash] ->
-                SortedTransactions =
-                    lists:filter(fun(T) ->
-                                         not lists:member(blockchain_txn:type(T),
-                                                          [blockchain_txn_rewards_v1,
-                                                           blockchain_txn_rewards_v2])
-                                 end,
-                                 lists:sort(fun blockchain_txn:sort/2, Txns)),
-                lager:info("metadata snapshot hash for ~p is ~p", [Block_Height_Next, SnapshotHash]),
-                % populate this from the last block, unless the last block was the genesis
-                % block in which case it will be 0
-                LastBlockTime = blockchain_block:time(CurrentBlock),
-                BlockTime =
-                    case miner_util:median([ X || X <- Stamps,
-                                                  X >= LastBlockTime]) of
-                        0 ->
-                            LastBlockTime + 1;
-                        LastBlockTime ->
-                            LastBlockTime + 1;
-                        NewTime ->
-                            NewTime
-                    end,
-                {ValidTransactions, InvalidTransactions0} = blockchain_txn:validate(SortedTransactions, Chain),
-                % InvalidTransactions0 is a list of tuples in the format {Txn, InvalidReason} we
-                % dont need the invalid reason here so need to remove the tuple format and have a
-                % regular list of txn items in prep for returning to hbbft
-                InvalidTransactions = [InvTxn || {InvTxn, _InvalidReason} <- InvalidTransactions0],
+    case process_hashes(Hashes, F) of
+        [CurrentBlockHash] ->
+            SortedTransactions =
+                lists:filter(fun(T) ->
+                                     not lists:member(blockchain_txn:type(T),
+                                                      [blockchain_txn_rewards_v1,
+                                                       blockchain_txn_rewards_v2])
+                             end,
+                             lists:sort(fun blockchain_txn:sort/2, Txns)),
+            lager:info("metadata snapshot hash for ~p is ~p", [Block_Height_Next, SnapshotHash]),
+            % populate this from the last block, unless the last block was the genesis
+            % block in which case it will be 0
+            LastBlockTime = blockchain_block:time(CurrentBlock),
+            BlockTime =
+                case miner_util:median([ X || X <- Stamps,
+                                              X >= LastBlockTime]) of
+                    0 ->
+                        LastBlockTime + 1;
+                    LastBlockTime ->
+                        LastBlockTime + 1;
+                    NewTime ->
+                        NewTime
+                end,
+            {ValidTransactions, InvalidTransactions0} = blockchain_txn:validate(SortedTransactions, Chain),
+            % InvalidTransactions0 is a list of tuples in the format {Txn, InvalidReason} we
+            % dont need the invalid reason here so need to remove the tuple format and have a
+            % regular list of txn items in prep for returning to hbbft
+            InvalidTransactions = [InvTxn || {InvTxn, _InvalidReason} <- InvalidTransactions0],
 
-                {ElectionEpoch, EpochStart, TxnsToInsert} =
-                    case blockchain_election:has_new_group(ValidTransactions) of
-                        {true, _, ConsensusGroupTxn, _} ->
-                            Epoch = ElectionEpoch0 + 1,
-                            Start = EpochStart0 + 1,
-                            End = Block_Height_Curr,
-                            RewardsMod = case blockchain:config(?rewards_txn_version, Ledger) of
-                                             {ok, 2} -> blockchain_txn_rewards_v2;
-                                             _ -> blockchain_txn_rewards_v1
-                                         end,
-                            {ok, Rewards} = RewardsMod:calculate_rewards(Start, End, Chain),
-                            lager:debug("RewardsMod: ~p, Rewards: ~p~n", [RewardsMod, Rewards]),
-                            RewardsTxn = RewardsMod:new(Start, End, Rewards),
-                            % to cut down on the size of group txn blocks, which we'll
-                            % need to fetch and store all of to validate snapshots, we
-                            % discard all other txns for this block
-                            {Epoch, Block_Height_Next, lists:sort(fun blockchain_txn:sort/2, [RewardsTxn, ConsensusGroupTxn])};
-                        _ ->
-                            {ElectionEpoch0, EpochStart0, ValidTransactions}
-                    end,
-                lager:info("new block time is ~p", [BlockTime]),
-                NewBlock = blockchain_block_v1:new(
-                             #{prev_hash => CurrentBlockHash,
-                               height => Block_Height_Next,
-                               transactions => TxnsToInsert,
-                               signatures => [],
-                               hbbft_round => HBBFTRound,
-                               time => BlockTime,
-                               election_epoch => ElectionEpoch,
-                               epoch_start => EpochStart,
-                               seen_votes => SeenVectors,
-                               bba_completion => BBA,
-                               snapshot_hash => SnapshotHash
-                              }),
-                BinNewBlock = blockchain_block:serialize(NewBlock),
-                Signature = SignFun(BinNewBlock),
-                % XXX: can we lose state here if we crash and recover later?
-                lager:debug("Worker:~p, Created Block: ~p, Txns: ~p",
-                            [self(), NewBlock, TxnsToInsert]),
-                % return both valid and invalid transactions to be deleted from the buffer
-                Ok =
-                    {
-                        libp2p_crypto:pubkey_to_bin(MyPubKey),
-                        BinNewBlock,
-                        Signature,
-                        TxnsToInsert,
-                        InvalidTransactions
-                    },
-                {ok, Ok};
-            [_OtherBlockHash] ->
-                {error, stale_hash};
-            List ->
-                lager:warning("got unexpected block hashes in stamp information ~p", [List]),
-                {error, multiple_hashes}
-        end,
-    Reply.
+            {ElectionEpoch, EpochStart, TxnsToInsert} =
+                case blockchain_election:has_new_group(ValidTransactions) of
+                    {true, _, ConsensusGroupTxn, _} ->
+                        Epoch = ElectionEpoch0 + 1,
+                        Start = EpochStart0 + 1,
+                        End = Block_Height_Curr,
+                        RewardsMod = case blockchain:config(?rewards_txn_version, Ledger) of
+                                         {ok, 2} -> blockchain_txn_rewards_v2;
+                                         _ -> blockchain_txn_rewards_v1
+                                     end,
+                        {ok, Rewards} = RewardsMod:calculate_rewards(Start, End, Chain),
+                        lager:debug("RewardsMod: ~p, Rewards: ~p~n", [RewardsMod, Rewards]),
+                        RewardsTxn = RewardsMod:new(Start, End, Rewards),
+                        % to cut down on the size of group txn blocks, which we'll
+                        % need to fetch and store all of to validate snapshots, we
+                        % discard all other txns for this block
+                        {Epoch, Block_Height_Next, lists:sort(fun blockchain_txn:sort/2, [RewardsTxn, ConsensusGroupTxn])};
+                    _ ->
+                        {ElectionEpoch0, EpochStart0, ValidTransactions}
+                end,
+            lager:info("new block time is ~p", [BlockTime]),
+            NewBlock = blockchain_block_v1:new(
+                         #{prev_hash => CurrentBlockHash,
+                           height => Block_Height_Next,
+                           transactions => TxnsToInsert,
+                           signatures => [],
+                           hbbft_round => HBBFTRound,
+                           time => BlockTime,
+                           election_epoch => ElectionEpoch,
+                           epoch_start => EpochStart,
+                           seen_votes => SeenVectors,
+                           bba_completion => BBA,
+                           snapshot_hash => SnapshotHash
+                          }),
+            BinNewBlock = blockchain_block:serialize(NewBlock),
+            Signature = SignFun(BinNewBlock),
+            % XXX: can we lose state here if we crash and recover later?
+            lager:debug("Worker:~p, Created Block: ~p, Txns: ~p",
+                        [self(), NewBlock, TxnsToInsert]),
+            % return both valid and invalid transactions to be deleted from the buffer
+            Ok =
+                {
+                    libp2p_crypto:pubkey_to_bin(MyPubKey),
+                    BinNewBlock,
+                    Signature,
+                    TxnsToInsert,
+                    InvalidTransactions
+                },
+            {ok, Ok};
+        [_OtherBlockHash] ->
+            {error, stale_hash};
+        List ->
+            lager:warning("got unexpected block hashes in stamp information ~p", [List]),
+            {error, multiple_hashes}
+    end.
 
 -spec metadata_to_seen_bbas(metadata()) ->
     [{{pos_integer(), binary()}, binary()}].
