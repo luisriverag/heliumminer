@@ -483,9 +483,9 @@ terminate(Reason, _State) ->
 %% Internal functions
 %% =================================================================
 
-% -----------------------------------------------------------------------------
-% BEGIN create_block refugees
-% -----------------------------------------------------------------------------
+%% ----------------------------------------------------------------------------
+%% BEGIN create_block refugees
+%% ----------------------------------------------------------------------------
 
 -spec create_block(
     [{pos_integer(), metadata() | {integer(), blockchain_block:hash()}}],
@@ -495,10 +495,10 @@ terminate(Reason, _State) ->
     swarm_keys()
 ) -> create_block_result().
 create_block(Metadata, Txns, HBBFTRound, Chain, {MyPubKey, SignFun}) ->
-    %% This can actually be a stale message, in which case we'd produce a block
-    %% with a garbage timestamp This is not actually that big of a deal, since
-    %% it won't be accepted, but we can short circuit some effort by checking
-    %% for a stale hash
+    % This can actually be a stale message, in which case we'd produce a block
+    % with a garbage timestamp This is not actually that big of a deal, since
+    % it won't be accepted, but we can short circuit some effort by checking
+    % for a stale hash
     Chain = blockchain_worker:blockchain(),
     {ok, CurrentBlock} = blockchain:head_block(Chain),
     {ok, CurrentBlockHash} = blockchain:head_hash(Chain),
@@ -506,7 +506,7 @@ create_block(Metadata, Txns, HBBFTRound, Chain, {MyPubKey, SignFun}) ->
     Block_Height_Next = Block_Height_Curr + 1,
     {ElectionEpoch0, EpochStart0} = blockchain_block_v1:election_info(CurrentBlock),
     lager:debug("Metadata ~p, current hash ~p", [Metadata, CurrentBlockHash]),
-    %% we expect every stamp to contain the same block hash
+    % we expect every stamp to contain the same block hash
     SeenBBAs =
         lists:foldl(fun({Idx, #{seen := Seen, bba_completion := B}}, Acc) -> % new map vsn
                             [{{Idx, Seen}, B} | Acc];
@@ -520,8 +520,8 @@ create_block(Metadata, Txns, HBBFTRound, Chain, {MyPubKey, SignFun}) ->
     {ok, N} = blockchain:config(?num_consensus_members, Ledger),
     F = ((N - 1) div 3),
 
-    %% find a snapshot hash.  if not enabled or we're unable to determine or agree on one, just
-    %% leave it blank, so other nodes can absorb it.
+    % find a snapshot hash.  if not enabled or we're unable to determine or agree on one, just
+    % leave it blank, so other nodes can absorb it.
     SnapshotHash = snapshot_hash(Ledger, Block_Height_Next, Metadata, F),
     {Stamps, Hashes} = meta_to_stamp_hashes(Metadata),
     {SeenVectors, BBAs} = lists:unzip(SeenBBAs),
@@ -538,8 +538,8 @@ create_block(Metadata, Txns, HBBFTRound, Chain, {MyPubKey, SignFun}) ->
                                  end,
                                  lists:sort(fun blockchain_txn:sort/2, Txns)),
                 lager:info("metadata snapshot hash for ~p is ~p", [Block_Height_Next, SnapshotHash]),
-                %% populate this from the last block, unless the last block was the genesis
-                %% block in which case it will be 0
+                % populate this from the last block, unless the last block was the genesis
+                % block in which case it will be 0
                 LastBlockTime = blockchain_block:time(CurrentBlock),
                 BlockTime =
                     case miner_util:median([ X || X <- Stamps,
@@ -552,9 +552,9 @@ create_block(Metadata, Txns, HBBFTRound, Chain, {MyPubKey, SignFun}) ->
                             NewTime
                     end,
                 {ValidTransactions, InvalidTransactions0} = blockchain_txn:validate(SortedTransactions, Chain),
-                %% InvalidTransactions0 is a list of tuples in the format {Txn, InvalidReason} we
-                %% dont need the invalid reason here so need to remove the tuple format and have a
-                %% regular list of txn items in prep for returning to hbbft
+                % InvalidTransactions0 is a list of tuples in the format {Txn, InvalidReason} we
+                % dont need the invalid reason here so need to remove the tuple format and have a
+                % regular list of txn items in prep for returning to hbbft
                 InvalidTransactions = [InvTxn || {InvTxn, _InvalidReason} <- InvalidTransactions0],
 
                 {ElectionEpoch, EpochStart, TxnsToInsert} =
@@ -570,9 +570,9 @@ create_block(Metadata, Txns, HBBFTRound, Chain, {MyPubKey, SignFun}) ->
                             {ok, Rewards} = RewardsMod:calculate_rewards(Start, End, Chain),
                             lager:debug("RewardsMod: ~p, Rewards: ~p~n", [RewardsMod, Rewards]),
                             RewardsTxn = RewardsMod:new(Start, End, Rewards),
-                            %% to cut down on the size of group txn blocks, which we'll
-                            %% need to fetch and store all of to validate snapshots, we
-                            %% discard all other txns for this block
+                            % to cut down on the size of group txn blocks, which we'll
+                            % need to fetch and store all of to validate snapshots, we
+                            % discard all other txns for this block
                             {Epoch, Block_Height_Next, lists:sort(fun blockchain_txn:sort/2, [RewardsTxn, ConsensusGroupTxn])};
                         _ ->
                             {ElectionEpoch0, EpochStart0, ValidTransactions}
@@ -593,10 +593,10 @@ create_block(Metadata, Txns, HBBFTRound, Chain, {MyPubKey, SignFun}) ->
                               }),
                 BinNewBlock = blockchain_block:serialize(NewBlock),
                 Signature = SignFun(BinNewBlock),
-                %% XXX: can we lose state here if we crash and recover later?
+                % XXX: can we lose state here if we crash and recover later?
                 lager:debug("Worker:~p, Created Block: ~p, Txns: ~p",
                             [self(), NewBlock, TxnsToInsert]),
-                %% return both valid and invalid transactions to be deleted from the buffer
+                % return both valid and invalid transactions to be deleted from the buffer
                 {ok, libp2p_crypto:pubkey_to_bin(MyPubKey), BinNewBlock,
                  Signature, TxnsToInsert, InvalidTransactions};
             [_OtherBlockHash] ->
@@ -661,9 +661,9 @@ snapshot_hash(Ledger, Block_Height_Next, Metadata, F) ->
             end;
         _ -> <<>>
     end.
-% -----------------------------------------------------------------------------
-% END create_block refugees
-% -----------------------------------------------------------------------------
+%% ----------------------------------------------------------------------------
+%% END create_block refugees
+%% ----------------------------------------------------------------------------
 
 set_next_block_timer(State=#state{blockchain=Chain}) ->
     Now = erlang:system_time(seconds),
