@@ -554,8 +554,6 @@ priv_create_block_2(Metadata, Txns, HBBFTRound, Chain, F, {MyPubKey, SignFun}) -
     Block_Height_Curr = blockchain_block:height(CurrentBlock),
     Block_Height_Next = Block_Height_Curr + 1,
     Ledger = blockchain:ledger(Chain),
-    % find a snapshot hash.  if not enabled or we're unable to determine or agree on one, just
-    % leave it blank, so other nodes can absorb it.
     SnapshotHash = snapshot_hash(Ledger, Block_Height_Next, Metadata, F),
     SeenBBAs = metadata_to_seen_bbas(Metadata),
     {SeenVectors, BBAs} = lists:unzip(SeenBBAs),
@@ -667,8 +665,9 @@ metadata_as_v1({S, H})                            -> {S, H}. % v1 -> v1
          M :: metadata(),
          F :: non_neg_integer().
 snapshot_hash(Ledger, Block_Height_Next, Metadata, F) ->
+    % Find a snapshot hash.  If not enabled or we're unable to determine or
+    % agree on one, just leave it blank, so other nodes can absorb it.
     case blockchain:config(?snapshot_interval, Ledger) of
-        % if we're expecting a snapshot
         {ok, Interval} when (Block_Height_Next - 1) rem Interval == 0 ->
             metadata_find_most_common_snapshot_hash(Metadata, F);
         _ ->
