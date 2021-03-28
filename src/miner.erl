@@ -640,9 +640,13 @@ priv_create_block_2(Metadata, Txns, HBBFTRound, Chain, F, {MyPubKey, SignFun}) -
 
 -spec metadata_to_seen_bbas(metadata()) ->
     [{{pos_integer(), binary()}, binary()}].
-metadata_to_seen_bbas(Metadata) ->
-    Metadata_V2 = lists:filter(fun ({_, M}) -> is_map(M) end, Metadata),
-    [{{J, S}, B} || {J, #{seen := S, bba_completion := B}} <- Metadata_V2].
+metadata_to_seen_bbas(M) ->
+    [{{J, S}, B} || {J, #{seen := S, bba_completion := B}} <- metadata_only_v2(M)].
+
+-spec metadata_only_v2(metadata()) ->
+    [{non_neg_integer(), metadata_v2()}].
+metadata_only_v2(Metadata) ->
+    lists:filter(fun ({_, M}) -> is_map(M) end, Metadata).
 
 -spec meta_to_stamp_hashes(metadata()) ->
     {
@@ -667,34 +671,40 @@ snapshot_hash(Ledger, Block_Height_Next, Metadata, F) ->
         {ok, Interval} ->
             % if we're expecting a snapshot
             case (Block_Height_Next - 1) rem Interval == 0 of
-                true ->
-                    % iterate through the metadata collecting them
-                    SHCt =
-                        lists:foldl(
-                          % we have one, so count unique instances of it
-                          fun({_Idx, #{snapshot_hash := SH}}, Acc) ->
-                                  maps:update_with(SH, fun(V) -> V + 1 end, 1, Acc);
-                             (_, Acc) ->
-                                  Acc
-                          end,
-                          #{},
-                          Metadata),
-                    % flatten the map into a list, sorted by hash count,
-                    % highest first. take the most common one and make sure
-                    % that enough nodes agree on that snapshot. if not, don't
-                    % return anything.
-                    case lists:reverse(lists:keysort(2, maps:to_list(SHCt))) of
-                        [] -> <<>>;
-                        % head should be the node with the highest count.
-                        % don't include it if we have too much disagreement or
-                        % not enough reports
-                        [{_, Ct} | _ ] when Ct < ((2*F)+1) -> <<>>;
-                        [{SH, _Ct} | _ ] -> SH
-                    end;
-                _ -> <<>>
+                true -> metadata_find_most_common_snapshot_hash(Metadata, F);
+                _    -> <<>>
             end;
-        _ -> <<>>
+        _ ->
+            <<>>
     end.
+
+metadata_find_most_common_snapshot_hash(Metadata, F) ->
+    % iterate through the metadata collecting them
+    Counts = metadata_count_snapshot_hashes(Metadata),
+    % flatten the map into a list, sorted by hash count,
+    % highest first. take the most common one and make sure
+    % that enough nodes agree on that snapshot. if not, don't
+    % return anything.
+    case lists:reverse(lists:keysort(2, maps:to_list(Counts))) of
+        [] ->
+            <<>>;
+        % head should be the node with the highest count.
+        % don't include it if we have too much disagreement or
+        % not enough reports
+        [{_, C} | _ ] when C < ((2*F)+1) ->
+            <<>>;
+        [{SH, _} | _ ] ->
+            SH
+    end.
+
+-spec metadata_count_snapshot_hashes(metadata()) -> #{binary() => pos_integer()}.
+metadata_count_snapshot_hashes(Metadata) ->
+    Plus1 = fun(V) -> V + 1 end,
+    lists:foldl(
+      % we have one, so count unique instances of it
+      fun({_, #{snapshot_hash := H}}, C) -> maps:update_with(H, Plus1, 1, C) end,
+      #{},
+      metadata_only_v2(Metadata)).
 
 %% ----------------------------------------------------------------------------
 %% END create_block refugees
