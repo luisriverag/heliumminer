@@ -539,6 +539,15 @@ priv_create_block_1(Metadata, Txns, HBBFTRound, Chain, Swarm_Keys) ->
             {error, multiple_hashes}
     end.
 
+-spec priv_create_block_2(
+    metadata(),
+    blockchain_txn:txns(),
+    non_neg_integer(),
+    blockchain:blockchain(),
+    non_neg_integer(),
+    swarm_keys()
+) ->
+    create_block_ok().
 priv_create_block_2(Metadata, Txns, HBBFTRound, Chain, F, {MyPubKey, SignFun}) ->
     {ok, CurrentBlock} = blockchain:head_block(Chain),
     {ok, CurrentBlockHash} = blockchain:head_hash(Chain),
@@ -686,6 +695,7 @@ snapshot_hash(Ledger, Block_Height_Next, Metadata, F) ->
             end;
         _ -> <<>>
     end.
+
 %% ----------------------------------------------------------------------------
 %% END create_block refugees
 %% ----------------------------------------------------------------------------
