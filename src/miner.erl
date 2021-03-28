@@ -364,8 +364,8 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
     Chain = blockchain_worker:blockchain(),
     {ok, CurrentBlock} = blockchain:head_block(Chain),
     {ok, CurrentBlockHash} = blockchain:head_hash(Chain),
-    CurrentBlockHeight = blockchain_block:height(CurrentBlock),
-    NewHeight = CurrentBlockHeight + 1,
+    Block_Height_Curr = blockchain_block:height(CurrentBlock),
+    Block_Height_Next = Block_Height_Curr + 1,
     {ElectionEpoch0, EpochStart0} = blockchain_block_v1:election_info(CurrentBlock),
     lager:debug("Metadata ~p, current hash ~p", [Metadata, CurrentBlockHash]),
     %% we expect every stamp to contain the same block hash
@@ -384,37 +384,7 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
 
     %% find a snapshot hash.  if not enabled or we're unable to determine or agree on one, just
     %% leave it blank, so other nodes can absorb it.
-    SnapshotHash =
-        case blockchain:config(?snapshot_interval, Ledger) of
-            {ok, Interval} ->
-                %% if we're expecting a snapshot
-                case (NewHeight - 1) rem Interval == 0 of
-                    true ->
-                        %% iterate through the metadata collecting them
-                        SHCt =
-                            lists:foldl(
-                              %% we have one, so count unique instances of it
-                              fun({_Idx, #{snapshot_hash := SH}}, Acc) ->
-                                      maps:update_with(SH, fun(V) -> V + 1 end, 1, Acc);
-                                 (_, Acc) ->
-                                      Acc
-                              end,
-                              #{},
-                              Metadata),
-                        %% flatten the map into a list, sorted by hash count, highest first. take
-                        %% the most common one and make sure that enough nodes agree on that
-                        %% snapshot. if not, don't return anything.
-                        case lists:reverse(lists:keysort(2, maps:to_list(SHCt))) of
-                            [] -> <<>>;
-                            %% head should be the node with the highest count.  don't include it if
-                            %% we have too much disagreement or not enough reports
-                            [{_, Ct} | _ ] when Ct < ((2*F)+1) -> <<>>;
-                            [{SH, _Ct} | _ ] -> SH
-                        end;
-                    _ -> <<>>
-                end;
-            _ -> <<>>
-        end,
+    SnapshotHash = snapshot_hash(Ledger, Block_Height_Next, Metadata, F),
     {Stamps, Hashes} = meta_to_stamp_hashes(Metadata),
     {SeenVectors, BBAs} = lists:unzip(SeenBBAs),
     {ok, Consensus} = blockchain_ledger_v1:consensus_members(blockchain:ledger(State#state.blockchain)),
@@ -429,7 +399,7 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
                                                            blockchain_txn_rewards_v2])
                                  end,
                                  lists:sort(fun blockchain_txn:sort/2, Txns)),
-                lager:info("metadata snapshot hash for ~p is ~p", [NewHeight, SnapshotHash]),
+                lager:info("metadata snapshot hash for ~p is ~p", [Block_Height_Next, SnapshotHash]),
                 %% populate this from the last block, unless the last block was the genesis
                 %% block in which case it will be 0
                 LastBlockTime = blockchain_block:time(CurrentBlock),
@@ -454,7 +424,7 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
                         {true, _, ConsensusGroupTxn, _} ->
                             Epoch = ElectionEpoch0 + 1,
                             Start = EpochStart0 + 1,
-                            End = CurrentBlockHeight,
+                            End = Block_Height_Curr,
                             RewardsMod = case blockchain:config(?rewards_txn_version, Ledger) of
                                              {ok, 2} -> blockchain_txn_rewards_v2;
                                              _ -> blockchain_txn_rewards_v1
@@ -465,14 +435,14 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
                             %% to cut down on the size of group txn blocks, which we'll
                             %% need to fetch and store all of to validate snapshots, we
                             %% discard all other txns for this block
-                            {Epoch, NewHeight, lists:sort(fun blockchain_txn:sort/2, [RewardsTxn, ConsensusGroupTxn])};
+                            {Epoch, Block_Height_Next, lists:sort(fun blockchain_txn:sort/2, [RewardsTxn, ConsensusGroupTxn])};
                         _ ->
                             {ElectionEpoch0, EpochStart0, ValidTransactions}
                     end,
                 lager:info("new block time is ~p", [BlockTime]),
                 NewBlock = blockchain_block_v1:new(
                              #{prev_hash => CurrentBlockHash,
-                               height => NewHeight,
+                               height => Block_Height_Next,
                                transactions => TxnsToInsert,
                                signatures => [],
                                hbbft_round => HBBFTRound,
@@ -608,6 +578,10 @@ terminate(Reason, _State) ->
 %% Internal functions
 %% =================================================================
 
+% -----------------------------------------------------------------------------
+% BEGIN create_block refugees
+% -----------------------------------------------------------------------------
+
 -spec meta_to_stamp_hashes([{pos_integer(), metadata() | {S, H}}]) -> {[S], [H]}
     when S :: integer(),
          H :: blockchain_block:hash().
@@ -623,6 +597,48 @@ meta_to_stamp_hashes(Metadata) ->
         end,
         {[], []},
         Metadata).
+
+-spec snapshot_hash(L, H, M, F) -> binary()
+    when L :: blockchain_ledger_v1:ledger(),
+         H :: non_neg_integer(),
+         M :: [{pos_integer(), metadata() | {integer(), blockchain_block:hash()}}],
+         F :: non_neg_integer().
+snapshot_hash(Ledger, Block_Height_Next, Metadata, F) ->
+    case blockchain:config(?snapshot_interval, Ledger) of
+        {ok, Interval} ->
+            % if we're expecting a snapshot
+            case (Block_Height_Next - 1) rem Interval == 0 of
+                true ->
+                    % iterate through the metadata collecting them
+                    SHCt =
+                        lists:foldl(
+                          % we have one, so count unique instances of it
+                          fun({_Idx, #{snapshot_hash := SH}}, Acc) ->
+                                  maps:update_with(SH, fun(V) -> V + 1 end, 1, Acc);
+                             (_, Acc) ->
+                                  Acc
+                          end,
+                          #{},
+                          Metadata),
+                    % flatten the map into a list, sorted by hash count,
+                    % highest first. take the most common one and make sure
+                    % that enough nodes agree on that snapshot. if not, don't
+                    % return anything.
+                    case lists:reverse(lists:keysort(2, maps:to_list(SHCt))) of
+                        [] -> <<>>;
+                        % head should be the node with the highest count.
+                        % don't include it if we have too much disagreement or
+                        % not enough reports
+                        [{_, Ct} | _ ] when Ct < ((2*F)+1) -> <<>>;
+                        [{SH, _Ct} | _ ] -> SH
+                    end;
+                _ -> <<>>
+            end;
+        _ -> <<>>
+    end.
+% -----------------------------------------------------------------------------
+% END create_block refugees
+% -----------------------------------------------------------------------------
 
 set_next_block_timer(State=#state{blockchain=Chain}) ->
     Now = erlang:system_time(seconds),
