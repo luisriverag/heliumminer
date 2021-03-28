@@ -637,6 +637,7 @@ meta_to_stamp_hashes(Metadata) ->
     lists:unzip([metadata_as_v1(M) || {_, M} <- Metadata]).
 
 -spec metadata_as_v1(metadata_v1() | metadata_v2()) -> metadata_v1().
+% XXX OBVIOUSLY, this drops the complement data:
 metadata_as_v1(#{head_hash := H, timestamp := S}) -> {S, H}; % v2 -> v1
 metadata_as_v1({S, H})                            -> {S, H}. % v1 -> v1
 
