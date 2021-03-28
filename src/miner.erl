@@ -31,6 +31,9 @@
 ]).
 
 -export_type([
+    result/2, % FIXME Should not live here - talk to professor about hope
+    create_block_ok/0,
+    create_block_error/0,
     create_block_result/0
 ]).
 
@@ -56,6 +59,32 @@
 
 -type swarm_keys() ::
     {libp2p_crypto:pubkey(), libp2p_crypto:sig_fun()}.
+
+% Allows to compose error-able functions.
+% TODO Talk to Professor about hope
+-type result(Ok, Error) :: {ok, Ok} | {error, Error}.
+
+% Named error type allows composition of bigger error types in longer,
+% composite expressions, like:
+%
+%     -spec pipeline() -> result(foo(), bar() | baz() | create_block_error()).
+%
+% which is helpful to both reader and Dialyzer.
+-type create_block_error() ::
+      stale_hash
+    | multiple_hashes.
+
+-type create_block_ok() ::
+    {
+        Address :: libp2p_crypto:pubkey_bin(),
+        UsignedBinaryBlock :: binary(),
+        Signature :: binary(),
+        PendingTxns :: blockchain_txn:txns(),
+        InvalidTxns :: blockchain_txn:txns()
+    }.
+
+-type create_block_result() ::
+    result(create_block_ok(), create_block_error()).
 
 -record(state, {
     %% NOTE: a miner may or may not participate in consensus
@@ -219,17 +248,6 @@ relcast_queue(Group) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
-% TODO Use symetric result type {ok, A} | {error, B}
--type create_block_result() ::
-    {ok,
-        Address :: libp2p_crypto:pubkey_bin(),
-        UsignedBinaryBlock :: binary(),
-        Signature :: binary(),
-        PendingTxns :: blockchain_txn:txns(),
-        InvalidTxns :: blockchain_txn:txns()
-    }
-    | {error, stale_hash | multiple_hashes}.
-
 -spec create_block(Metadata :: [{pos_integer(), #{}},...],
                    Txns :: blockchain_txn:txns(),
                    HBBFTRound :: non_neg_integer())
@@ -493,7 +511,8 @@ terminate(Reason, _State) ->
     non_neg_integer(),
     blockchain:blockchain(),
     swarm_keys()
-) -> create_block_result().
+) ->
+    create_block_result().
 create_block(Metadata, Txns, HBBFTRound, Chain, {MyPubKey, SignFun}) ->
     % This can actually be a stale message, in which case we'd produce a block
     % with a garbage timestamp This is not actually that big of a deal, since

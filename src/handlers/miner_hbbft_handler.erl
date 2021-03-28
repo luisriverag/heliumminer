@@ -304,7 +304,7 @@ handle_message(BinMsg, Index, State=#state{hbbft = HBBFT}) ->
                     NewRound = hbbft:round(NewHBBFT),
                     Before = erlang:monotonic_time(millisecond),
                     case miner:create_block(Metadata, Txns, NewRound) of
-                        {ok, Address, Artifact, Signature, PendingTxns, InvalidTxns} ->
+                        {ok, {Address, Artifact, Signature, PendingTxns, InvalidTxns}} ->
                             ?mark(block_success),
                             %% call hbbft finalize round
                             Duration = erlang:monotonic_time(millisecond) - Before,
