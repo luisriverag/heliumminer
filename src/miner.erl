@@ -530,16 +530,7 @@ priv_create_block(Metadata, Txns, HBBFTRound, Chain, {MyPubKey, SignFun}) ->
     {ElectionEpoch0, EpochStart0} = blockchain_block_v1:election_info(CurrentBlock),
     lager:debug("Metadata ~p, current hash ~p", [Metadata, CurrentBlockHash]),
     % we expect every stamp to contain the same block hash
-    SeenBBAs =
-        lists:foldl(fun({Idx, #{seen := Seen, bba_completion := B}}, Acc) -> % new map vsn
-                            [{{Idx, Seen}, B} | Acc];
-                       (_, Acc) ->
-                            % Q: maybe crash here?
-                            % A: No. Because metadata can be v1/old or v2/new.
-                            Acc
-                    end,
-                    [],
-                    Metadata),
+    SeenBBAs = metadata_to_seen_bbas(Metadata),
     Ledger = blockchain:ledger(Chain),
     {ok, N} = blockchain:config(?num_consensus_members, Ledger),
     F = ((N - 1) div 3),
@@ -630,6 +621,12 @@ priv_create_block(Metadata, Txns, HBBFTRound, Chain, {MyPubKey, SignFun}) ->
                 {error, multiple_hashes}
         end,
     Reply.
+
+-spec metadata_to_seen_bbas(metadata()) ->
+    [{{pos_integer(), binary()}, binary()}].
+metadata_to_seen_bbas(Metadata) ->
+    Metadata_V2 = lists:filter(fun ({_, M}) -> is_map(M) end, Metadata),
+    [{{J, S}, B} || {J, #{seen := S, bba_completion := B}} <- Metadata_V2].
 
 -spec meta_to_stamp_hashes(metadata()) ->
     {
