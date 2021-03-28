@@ -668,12 +668,9 @@ metadata_as_v1({S, H})                            -> {S, H}. % v1 -> v1
          F :: non_neg_integer().
 snapshot_hash(Ledger, Block_Height_Next, Metadata, F) ->
     case blockchain:config(?snapshot_interval, Ledger) of
-        {ok, Interval} ->
-            % if we're expecting a snapshot
-            case (Block_Height_Next - 1) rem Interval == 0 of
-                true -> metadata_find_most_common_snapshot_hash(Metadata, F);
-                _    -> <<>>
-            end;
+        % if we're expecting a snapshot
+        {ok, Interval} when (Block_Height_Next - 1) rem Interval == 0 ->
+            metadata_find_most_common_snapshot_hash(Metadata, F);
         _ ->
             <<>>
     end.
