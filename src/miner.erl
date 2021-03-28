@@ -534,7 +534,8 @@ priv_create_block(Metadata, Txns, HBBFTRound, Chain, {MyPubKey, SignFun}) ->
         lists:foldl(fun({Idx, #{seen := Seen, bba_completion := B}}, Acc) -> % new map vsn
                             [{{Idx, Seen}, B} | Acc];
                        (_, Acc) ->
-                            %% maybe crash here?
+                            % Q: maybe crash here?
+                            % A: No. Because metadata can be v1/old or v2/new.
                             Acc
                     end,
                     [],
