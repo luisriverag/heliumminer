@@ -254,10 +254,8 @@ relcast_queue(Group) ->
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec create_block(Metadata :: [{pos_integer(), #{}},...],
-                   Txns :: blockchain_txn:txns(),
-                   HBBFTRound :: non_neg_integer())
-                  -> create_block_result().
+-spec create_block(metadata(), blockchain_txn:txns(), non_neg_integer()) ->
+    create_block_result().
 create_block(Metadata, Txns, HBBFTRound) ->
     try
         gen_server:call(?MODULE, {create_block, Metadata, Txns, HBBFTRound}, infinity)
