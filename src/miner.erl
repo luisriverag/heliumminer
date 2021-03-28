@@ -48,7 +48,10 @@
     terminate/2
 ]).
 
--type metadata() ::
+-type metadata_v1() ::
+    {integer(), blockchain_block:hash()}.
+
+-type metadata_v2() ::
     #{
         timestamp      => integer(),
         seen           => binary(),
@@ -56,6 +59,9 @@
         head_hash      => blockchain_block:hash(),
         snapshot_hash  => binary()
      }.
+
+-type metadata() ::
+    [{J :: pos_integer(), M :: metadata_v2() | metadata_v1()}].
 
 -type swarm_keys() ::
     {libp2p_crypto:pubkey(), libp2p_crypto:sig_fun()}.
@@ -390,7 +396,7 @@ handle_call(
     _From,
     #state{blockchain=Chain, swarm_keys=SK}=State
 ) ->
-    Reply = create_block(Metadata, Txns, HBBFTRound, Chain, SK),
+    Reply = priv_create_block(Metadata, Txns, HBBFTRound, Chain, SK),
     {reply, Reply, State};
 handle_call(_Msg, _From, State) ->
     lager:warning("unhandled call ~p", [_Msg]),
@@ -505,15 +511,15 @@ terminate(Reason, _State) ->
 %% BEGIN create_block refugees
 %% ----------------------------------------------------------------------------
 
--spec create_block(
-    [{pos_integer(), metadata() | {integer(), blockchain_block:hash()}}],
+-spec priv_create_block(
+    metadata(),
     blockchain_txn:txns(),
     non_neg_integer(),
     blockchain:blockchain(),
     swarm_keys()
 ) ->
     create_block_result().
-create_block(Metadata, Txns, HBBFTRound, Chain, {MyPubKey, SignFun}) ->
+priv_create_block(Metadata, Txns, HBBFTRound, Chain, {MyPubKey, SignFun}) ->
     % This can actually be a stale message, in which case we'd produce a block
     % with a garbage timestamp This is not actually that big of a deal, since
     % it won't be accepted, but we can short circuit some effort by checking
@@ -626,26 +632,22 @@ create_block(Metadata, Txns, HBBFTRound, Chain, {MyPubKey, SignFun}) ->
         end,
     Reply.
 
--spec meta_to_stamp_hashes([{pos_integer(), metadata() | {S, H}}]) -> {[S], [H]}
-    when S :: integer(),
-         H :: blockchain_block:hash().
+-spec meta_to_stamp_hashes(metadata()) ->
+    {
+        Stamps :: [integer()],
+        Hashes :: [blockchain_block:hash()]
+    }.
 meta_to_stamp_hashes(Metadata) ->
-    lists:foldl(
-        fun
-            % old tuple vsn
-            ({_, {S, H}}, {Stamps, Hashes}) ->
-                {[S | Stamps], [H | Hashes]};
-            % new map vsn
-            ({_, #{head_hash := H, timestamp := S}}, {Stamps, Hashes}) ->
-                {[S | Stamps], [H | Hashes]}
-        end,
-        {[], []},
-        Metadata).
+    lists:unzip([metadata_as_v1(M) || {_, M} <- Metadata]).
+
+-spec metadata_as_v1(metadata_v1() | metadata_v2()) -> metadata_v1().
+metadata_as_v1(#{head_hash := H, timestamp := S}) -> {S, H}; % v2 -> v1
+metadata_as_v1({S, H})                            -> {S, H}. % v1 -> v1
 
 -spec snapshot_hash(L, H, M, F) -> binary()
     when L :: blockchain_ledger_v1:ledger(),
          H :: non_neg_integer(),
-         M :: [{pos_integer(), metadata() | {integer(), blockchain_block:hash()}}],
+         M :: metadata(),
          F :: non_neg_integer().
 snapshot_hash(Ledger, Block_Height_Next, Metadata, F) ->
     case blockchain:config(?snapshot_interval, Ledger) of
