@@ -41,6 +41,15 @@
     terminate/2
 ]).
 
+-type metadata() ::
+    #{
+        timestamp      => integer(),
+        seen           => binary(),
+        bba_completion => binary(),
+        head_hash      => blockchain_block:hash(),
+        snapshot_hash  => binary()
+     }.
+
 -record(state, {
     %% NOTE: a miner may or may not participate in consensus
     consensus_group :: undefined | pid(),
@@ -346,10 +355,12 @@ handle_call({start_chain, ConsensusGroup, Chain}, _From, State) ->
     lager:info("registering first consensus group"),
     {reply, ok, set_next_block_timer(State#state{consensus_group = ConsensusGroup,
                                                  blockchain = Chain})};
+% TODO Pull-out clause bodies into functions
 handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
-    %% This can actually be a stale message, in which case we'd produce a block with a garbage timestamp
-    %% This is not actually that big of a deal, since it won't be accepted, but we can short circuit some effort
-    %% by checking for a stale hash
+    %% This can actually be a stale message, in which case we'd produce a block
+    %% with a garbage timestamp This is not actually that big of a deal, since
+    %% it won't be accepted, but we can short circuit some effort by checking
+    %% for a stale hash
     Chain = blockchain_worker:blockchain(),
     {ok, CurrentBlock} = blockchain:head_block(Chain),
     {ok, CurrentBlockHash} = blockchain:head_hash(Chain),
@@ -358,17 +369,6 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
     {ElectionEpoch0, EpochStart0} = blockchain_block_v1:election_info(CurrentBlock),
     lager:debug("Metadata ~p, current hash ~p", [Metadata, CurrentBlockHash]),
     %% we expect every stamp to contain the same block hash
-    StampHashes =
-        lists:foldl(fun({_, {Stamp, Hash}}, Acc) -> % old tuple vsn
-                            [{Stamp, Hash} | Acc];
-                       ({_, #{head_hash := Hash, timestamp := Stamp}}, Acc) -> % new map vsn
-                            [{Stamp, Hash} | Acc];
-                       (_, Acc) ->
-                            %% maybe crash here?
-                            Acc
-                    end,
-                    [],
-                    Metadata),
     SeenBBAs =
         lists:foldl(fun({Idx, #{seen := Seen, bba_completion := B}}, Acc) -> % new map vsn
                             [{{Idx, Seen}, B} | Acc];
@@ -415,7 +415,7 @@ handle_call({create_block, Metadata, Txns, HBBFTRound}, _From, State) ->
                 end;
             _ -> <<>>
         end,
-    {Stamps, Hashes} = lists:unzip(StampHashes),
+    {Stamps, Hashes} = meta_to_stamp_hashes(Metadata),
     {SeenVectors, BBAs} = lists:unzip(SeenBBAs),
     {ok, Consensus} = blockchain_ledger_v1:consensus_members(blockchain:ledger(State#state.blockchain)),
     BBA = process_bbas(length(Consensus), BBAs),
@@ -607,6 +607,22 @@ terminate(Reason, _State) ->
 %% ==================================================================
 %% Internal functions
 %% =================================================================
+
+-spec meta_to_stamp_hashes([{pos_integer(), metadata() | {S, H}}]) -> {[S], [H]}
+    when S :: integer(),
+         H :: blockchain_block:hash().
+meta_to_stamp_hashes(Metadata) ->
+    lists:foldl(
+        fun
+            % old tuple vsn
+            ({_, {S, H}}, {Stamps, Hashes}) ->
+                {[S | Stamps], [H | Hashes]};
+            % new map vsn
+            ({_, #{head_hash := H, timestamp := S}}, {Stamps, Hashes}) ->
+                {[S | Stamps], [H | Hashes]}
+        end,
+        {[], []},
+        Metadata).
 
 set_next_block_timer(State=#state{blockchain=Chain}) ->
     Now = erlang:system_time(seconds),
