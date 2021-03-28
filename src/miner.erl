@@ -394,8 +394,8 @@ handle_call(
     _From,
     #state{blockchain=Chain, swarm_keys=SK}=State
 ) ->
-    Reply = priv_create_block(Metadata, Txns, HBBFTRound, Chain, SK),
-    {reply, Reply, State};
+    Result = priv_create_block(Metadata, Txns, HBBFTRound, Chain, SK),
+    {reply, Result, State};
 handle_call(_Msg, _From, State) ->
     lager:warning("unhandled call ~p", [_Msg]),
     {noreply, State}.
@@ -612,8 +612,15 @@ priv_create_block(Metadata, Txns, HBBFTRound, Chain, {MyPubKey, SignFun}) ->
                 lager:debug("Worker:~p, Created Block: ~p, Txns: ~p",
                             [self(), NewBlock, TxnsToInsert]),
                 % return both valid and invalid transactions to be deleted from the buffer
-                {ok, libp2p_crypto:pubkey_to_bin(MyPubKey), BinNewBlock,
-                 Signature, TxnsToInsert, InvalidTransactions};
+                Ok =
+                    {
+                        libp2p_crypto:pubkey_to_bin(MyPubKey),
+                        BinNewBlock,
+                        Signature,
+                        TxnsToInsert,
+                        InvalidTransactions
+                    },
+                {ok, Ok};
             [_OtherBlockHash] ->
                 {error, stale_hash};
             List ->
