@@ -73,12 +73,13 @@
     | multiple_hashes.
 
 -type create_block_ok() ::
-    {
-        Address :: libp2p_crypto:pubkey_bin(),
-        UsignedBinaryBlock :: binary(),
-        Signature :: binary(),
-        PendingTxns :: blockchain_txn:txns(),
-        InvalidTxns :: blockchain_txn:txns()
+    % TODO Consider using a record - syntactically heavier, but semantically better.
+    #{
+        address               =>  libp2p_crypto:pubkey_bin(),
+        unsigned_binary_block =>  binary(),
+        signature             =>  binary(),
+        pending_txns          =>  blockchain_txn:txns(),
+        invalid_txns          =>  blockchain_txn:txns()
     }.
 
 -type create_block_result() ::
@@ -581,12 +582,12 @@ priv_create_block_2(Metadata, Txns, HBBFTRound, Chain, F, {MyPubKey, SignFun}) -
     lager:debug("Worker:~p, Created Block: ~p, Txns: ~p",
                 [self(), NewBlock, TxnsToInsert]),
     % return both valid and invalid transactions to be deleted from the buffer
-    {
-        libp2p_crypto:pubkey_to_bin(MyPubKey),
-        BinNewBlock,
-        Signature,
-        TxnsToInsert,
-        InvalidTransactions
+    #{
+        address               => libp2p_crypto:pubkey_to_bin(MyPubKey),
+        unsigned_binary_block => BinNewBlock,
+        signature             => Signature,
+        pending_txns          => TxnsToInsert,
+        invalid_txns          => InvalidTransactions
     }.
 
 -spec metadata_to_seen_bbas(metadata()) ->
