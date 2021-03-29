@@ -675,9 +675,9 @@ snapshot_hash(Ledger, Block_Height_Next, Metadata, F) ->
     end.
 
 metadata_find_most_common_snapshot_hash(Metadata, F) ->
-    Counts = metadata_count_snapshot_hashes(Metadata),
+    Counts = maps:to_list(metadata_count_snapshot_hashes(Metadata)),
     % Looking for highest count AND sufficient agreement:
-    case lists:reverse(lists:keysort(2, maps:to_list(Counts))) of
+    case lists:sort(fun ({_, C1}, {_, C2}) -> C1 > C2 end, Counts) of
         []                                   -> <<>>;
         [{_, C} | _ ] when C < ((2 * F) + 1) -> <<>>; % Insufficient agreement.
         [{H, _} | _ ]                        -> H
