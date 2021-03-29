@@ -638,11 +638,7 @@ metadata_find_most_common_snapshot_hash(Metadata, F) ->
 
 -spec metadata_count_snapshot_hashes(metadata()) -> #{binary() => pos_integer()}.
 metadata_count_snapshot_hashes(Metadata) ->
-    Plus1 = fun(V) -> V + 1 end,
-    lists:foldl(
-      fun({_, #{snapshot_hash := H}}, C) -> maps:update_with(H, Plus1, 1, C) end,
-      #{},
-      metadata_only_v2(Metadata)).
+    list_count([H || {_, #{snapshot_hash := H}} <- metadata_only_v2(Metadata)]).
 
 %% ----------------------------------------------------------------------------
 %% END create_block refugees
@@ -697,31 +693,26 @@ set_next_block_timer(State=#state{blockchain=Chain}) ->
     State#state{block_timer=Timer}.
 
 process_hashes(Hashes, F) ->
-    Map = lists:foldl(
-            fun(Hash, M) ->
-                    maps:update_with(Hash, fun(X) -> X + 1 end, 1, M)
-            end,
-            #{},
-            Hashes),
+    Counts = list_count(Hashes),
     Threshold = (2 * F) + 1,
-    case maps:filter(fun(_H, Ct) -> Ct >= Threshold end, Map) of
+    case maps:filter(fun(_, C) -> C >= Threshold end, Counts) of
         M when map_size(M) == 1 ->
             [{H, _Ct}] = maps:to_list(M),
             [H];
         _ ->
-            maps:to_list(Map)
+            maps:to_list(Counts)
     end.
 
 process_bbas(N, BBAs) ->
     %% 2f + 1 = N - ((N - 1) div 3)
     Threshold = N - ((N - 1) div 3),
-    M = lists:foldl(fun(B, Acc) -> maps:update_with(B, fun(V) -> V + 1 end, 1, Acc) end, #{}, BBAs),
-    case maps:size(M) of
+    Counts = list_count(BBAs),
+    case maps:size(Counts) of
         0 ->
             <<>>;
         _ ->
             %% this should work for any other value
-            [{BBAVal, Ct} | _] = lists:reverse(lists:keysort(2, maps:to_list(M))),
+            [{BBAVal, Ct} | _] = lists:reverse(lists:keysort(2, maps:to_list(Counts))),
             case Ct >= Threshold of
                 true ->
                     BBAVal;
@@ -729,6 +720,18 @@ process_bbas(N, BBAs) ->
                     <<>>
             end
     end.
+
+%% TODO list_count belongs in a general lib
+-spec list_count([A]) ->
+    #{A => pos_integer()}.
+list_count(Xs) ->
+    lists:foldl(
+        fun(X, Counts) ->
+            maps:update_with(X, fun(C) -> C + 1 end, 1, Counts)
+        end,
+        #{},
+        Xs
+    ).
 
 %% input in fractional seconds, the number of seconds between the
 %% target block time and the average total time over the target period
