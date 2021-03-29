@@ -1,8 +1,3 @@
-%%%-------------------------------------------------------------------
-
-%% @doc miner
-%% @end
-%%%-------------------------------------------------------------------
 -module(miner).
 
 -behavior(gen_server).
@@ -10,9 +5,7 @@
 -include_lib("blockchain/include/blockchain_vars.hrl").
 -include_lib("blockchain/include/blockchain.hrl").
 
-%% ------------------------------------------------------------------
-%% API Function Exports
-%% ------------------------------------------------------------------
+%% API
 -export([
     start_link/0,
     p2p_status/0,
@@ -37,9 +30,7 @@
     create_block_result/0
 ]).
 
-%% ------------------------------------------------------------------
-%% gen_server Function Exports
-%% ------------------------------------------------------------------
+%% gen_server
 -export([
     init/1,
     handle_call/3,
@@ -47,6 +38,7 @@
     handle_info/2,
     terminate/2
 ]).
+
 
 -type metadata_v1() ::
     {integer(), blockchain_block:hash()}.
@@ -93,10 +85,10 @@
     result(create_block_ok(), create_block_error()).
 
 -record(state, {
-    %% NOTE: a miner may or may not participate in consensus
+    % NOTE: a miner may or may not participate in consensus
     consensus_group :: undefined | pid(),
     blockchain :: undefined | blockchain:blockchain(),
-    %% but every miner keeps a timer reference?
+    % but every miner keeps a timer reference?
     block_timer = make_ref() :: reference(),
     current_height = -1 :: integer(),
     blockchain_ref = make_ref() :: reference(),
@@ -137,27 +129,18 @@ inc_tv(Incr) ->
 
 -endif.
 
-%% ------------------------------------------------------------------
-%% API Function Definitions
-%% ------------------------------------------------------------------
+%% ----------------------------------------------------------------------------
+%% API
+%% ----------------------------------------------------------------------------
 
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], [{hibernate_after, 5000}]).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 block_age() ->
     Chain = blockchain_worker:blockchain(),
     {ok, Block} = blockchain:head_block(Chain),
     erlang:system_time(seconds) - blockchain_block:time(Block).
 
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 -spec p2p_status() -> [{Check::string(), Result::string()}].
 p2p_status() ->
     SwarmTID = blockchain_swarm:tid(),
@@ -199,10 +182,6 @@ p2p_status() ->
                           {CheckNatType, "nat_type"},
                           {CheckHeight, "height"}]).
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 %% TODO: spec
 relcast_info(Group) ->
     Mod = case Group of
@@ -217,10 +196,6 @@ relcast_info(Group) ->
             libp2p_group_relcast:info(Pid)
     end.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 %% TODO: spec
 relcast_queue(Group) ->
     Mod = case Group of
@@ -250,10 +225,6 @@ relcast_queue(Group) ->
             end
     end.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 -spec create_block(metadata(), blockchain_txn:txns(), non_neg_integer()) ->
     create_block_result().
 create_block(Metadata, Txns, HBBFTRound) ->
@@ -264,10 +235,6 @@ create_block(Metadata, Txns, HBBFTRound) ->
             {error, no_miner}
     end.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 %% TODO: spec
 hbbft_status() ->
     case gen_server:call(?MODULE, consensus_group, 60000) of
@@ -283,10 +250,6 @@ hbbft_status() ->
             end
     end.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 %% TODO: spec
 hbbft_skip() ->
     case gen_server:call(?MODULE, consensus_group, 60000) of
@@ -303,17 +266,14 @@ hbbft_skip() ->
             end
     end.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 -spec signed_block([binary()], binary()) -> ok.
 signed_block(Signatures, BinBlock) ->
-    %% Once a miner gets a sign_block message (only happens if the miner is in consensus group):
-    %% * cancel the block timer
-    %% * sign the block
-    %% * tell hbbft to go to next round
-    %% * add the block to blockchain
+    % Once a miner gets a sign_block message (only happens if the miner is in
+    % consensus group):
+    % * cancel the block timer
+    % * sign the block
+    % * tell hbbft to go to next round
+    % * add the block to blockchain
     Chain = blockchain_worker:blockchain(),
     Block = blockchain_block:set_signatures(blockchain_block:deserialize(BinBlock), Signatures),
     case blockchain:add_block(Block, Chain) of
@@ -329,7 +289,7 @@ signed_block(Signatures, BinBlock) ->
             {Signatories, _} = lists:unzip(blockchain_block:signatures(Block)),
 
             {ok, ConsensusAddrs} = blockchain_ledger_v1:consensus_members(blockchain:ledger(Chain)),
-            %% FF non signatory consensus members
+            % FF non signatory consensus members
             lists:foreach(
               fun(Member) ->
                       spawn(fun() -> blockchain_fastforward_handler:dial(Swarm, Chain, libp2p_crypto:pubkey_bin_to_p2p(Member)) end)
@@ -339,13 +299,6 @@ signed_block(Signatures, BinBlock) ->
             lager:error("signed_block, error: ~p", [Error])
     end,
     ok.
-
-
-
-%%--------------------------------------------------------------------
-%% @doc
-%% @end
-%%--------------------------------------------------------------------
 
 start_chain(ConsensusGroup, Chain) ->
     gen_server:call(?MODULE, {start_chain, ConsensusGroup, Chain}, infinity).
@@ -361,9 +314,8 @@ version() ->
     2.
 
 %% ------------------------------------------------------------------
-%% gen_server Function Definitions
+%% gen_server
 %% ------------------------------------------------------------------
-
 
 init(_Args) ->
     lager:info("STARTING UP MINER"),
@@ -430,8 +382,9 @@ handle_info({blockchain_event, {add_block, Hash, Sync, _Ledger}},
                          current_height = CurrHeight,
                          blockchain = Chain}) when ConsensusGroup /= undefined andalso
                                                    Chain /= undefined ->
-    %% NOTE: only the consensus group member must do this
-    %% If this miner is in consensus group and lagging on a previous hbbft round, make it forcefully go to next round
+    % NOTE: only the consensus group member must do this
+    % If this miner is in consensus group and lagging on a previous hbbft
+    % round, make it forcefully go to next round
     NewState =
         case blockchain:get_block(Hash, Chain) of
             {ok, Block} ->
@@ -501,9 +454,9 @@ terminate(Reason, _State) ->
     lager:info("stopping: ~p", [Reason]),
     ok.
 
-%% ==================================================================
-%% Internal functions
-%% =================================================================
+%% ============================================================================
+%% Private
+%% ============================================================================
 
 %% ----------------------------------------------------------------------------
 %% BEGIN create_block refugees
@@ -568,8 +521,8 @@ priv_create_block_2(Metadata, Txns, HBBFTRound, Chain, F, {MyPubKey, SignFun}) -
                      end,
                      lists:sort(fun blockchain_txn:sort/2, Txns)),
     lager:info("metadata snapshot hash for ~p is ~p", [Block_Height_Next, SnapshotHash]),
-    % populate this from the last block, unless the last block was the genesis
-    % block in which case it will be 0
+    % Populate this from the last block, unless the last block was the genesis
+    % block in which case it will be 0.
     LastBlockTime = blockchain_block:time(CurrentBlock),
     {Stamps, _} = meta_to_stamp_hashes(Metadata),
     BlockTime =
@@ -583,9 +536,9 @@ priv_create_block_2(Metadata, Txns, HBBFTRound, Chain, F, {MyPubKey, SignFun}) -
                 NewTime
         end,
     {ValidTransactions, InvalidTransactions0} = blockchain_txn:validate(SortedTransactions, Chain),
-    % InvalidTransactions0 is a list of tuples in the format {Txn, InvalidReason} we
-    % dont need the invalid reason here so need to remove the tuple format and have a
-    % regular list of txn items in prep for returning to hbbft
+    % InvalidTransactions0 is a list of tuples in the format {Txn, InvalidReason}
+    % we dont need the invalid reason here so need to remove the tuple format
+    % and have a regular list of txn items in prep for returning to hbbft.
     InvalidTransactions = [InvTxn || {InvTxn, _InvalidReason} <- InvalidTransactions0],
 
     {ElectionEpoch, EpochStart, TxnsToInsert} =
@@ -601,9 +554,9 @@ priv_create_block_2(Metadata, Txns, HBBFTRound, Chain, F, {MyPubKey, SignFun}) -
                 {ok, Rewards} = RewardsMod:calculate_rewards(Start, End, Chain),
                 lager:debug("RewardsMod: ~p, Rewards: ~p~n", [RewardsMod, Rewards]),
                 RewardsTxn = RewardsMod:new(Start, End, Rewards),
-                % to cut down on the size of group txn blocks, which we'll
-                % need to fetch and store all of to validate snapshots, we
-                % discard all other txns for this block
+                % To cut down on the size of group txn blocks, which we'll need
+                % to fetch and store all of to validate snapshots, we discard
+                % all other txns for this block.
                 {Epoch, Block_Height_Next, lists:sort(fun blockchain_txn:sort/2, [RewardsTxn, ConsensusGroupTxn])};
             _ ->
                 {ElectionEpoch0, EpochStart0, ValidTransactions}
